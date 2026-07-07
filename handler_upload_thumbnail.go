@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -55,8 +58,21 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	fileType := strings.TrimPrefix(header.Header.Get("Content-Type"), "image/")
-	filePath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%s.%s", videoID, fileType))
+	fileType, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong", err)
+		return
+	}
+	if fileType != "image/jpeg" && fileType != "image/png" {
+		respondWithError(w, http.StatusBadRequest, "Image must be a jpeg or png", err)
+		return
+	}
+
+	fileExtension := strings.TrimPrefix(fileType, "image/")
+	randomNameBytes := make([]byte, 32)
+	rand.Read(randomNameBytes)
+	randomName := base64.RawURLEncoding.EncodeToString(randomNameBytes)
+	filePath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%s.%s", randomName, fileExtension))
 	newFile, err := os.Create(filePath)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Something went wrong", err)
@@ -66,7 +82,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	io.Copy(newFile, file)
 
-	thumbnailUrl := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, videoID, fileType)
+	thumbnailUrl := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, randomName, fileExtension)
 	video.ThumbnailURL = &thumbnailUrl
 
 	if err = cfg.db.UpdateVideo(video); err != nil {
